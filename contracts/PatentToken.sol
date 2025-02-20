@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 interface IPatentRegistry {
-    function getPatent(uint256 patentId) external view returns (
+    function getPatent(uint256 Pid) external view returns (
         string memory title,
         string memory ipfsHash,
         uint256 price,
@@ -117,7 +117,7 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         emit LiquidityAdded(msg.sender, msg.value);
     }
 
-    function calculatePrice(uint256 amount, bool isBuy) public view returns (uint256) {
+    function calculatePrice(uint256 amount) public view returns (uint256) {
         require(amount > 0, "Amount must be greater than 0");
         uint256 reserve = balanceOf(address(this));
         uint256 scalingFactor = 1e18;
@@ -134,7 +134,7 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         uint256 liquidityTokens = balanceOf(address(this));
         require(amount <= liquidityTokens, "Insufficient liquidity");
         
-        uint256 price = calculatePrice(amount, true);
+        uint256 price = calculatePrice(amount);
         uint256 totalCost = (amount * price) / 10**18;
         require(msg.value >= totalCost, "Insufficient payment");
 
@@ -172,7 +172,7 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         require(balanceOf(msg.sender) >= amount, "Insufficient balance");
         require(liquidityPool > 0, "No liquidity");
         
-        uint256 price = calculatePrice(amount, false);
+        uint256 price = calculatePrice(amount);
         uint256 saleProceeds = (amount * price) / 10**18;
         require(liquidityPool >= saleProceeds, "Insufficient liquidity for sale");
         

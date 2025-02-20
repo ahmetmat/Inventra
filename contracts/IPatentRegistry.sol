@@ -1,9 +1,8 @@
-// IPatentRegistry.sol
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 interface IPatentRegistry {
-    function getPatent(uint256 patentId) external view returns (
+    function getPatent(uint256 Pid) external view returns (
         string memory title,
         string memory ipfsHash,
         uint256 price,
@@ -15,16 +14,10 @@ interface IPatentRegistry {
     );
 }
 
-// PatentRegistry.sol
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
-
-contract PatentRegistry is IPatentRegistry, Ownable, Pausable {
-    using Counters for Counters.Counter;
+contract PatentRegistry is IPatentRegistry {
+    // Custom Owner implementation
+    address private _owner;
+    bool private _paused;
     
     struct Patent {
         string title;
@@ -37,28 +30,84 @@ contract PatentRegistry is IPatentRegistry, Ownable, Pausable {
         bool isVerified;
     }
     
-    Counters.Counter private _patentIds;
+    uint256 private nextPatentId = 1;
     mapping(uint256 => Patent) private _patents;
     mapping(string => bool) private _patentIdExists;
     mapping(address => uint256[]) private _inventorPatents;
     
+    // Events
     event PatentRegistered(uint256 indexed patentId, string title, address inventor);
     event PatentVerified(uint256 indexed patentId);
     event PatentUpdated(uint256 indexed patentId, string ipfsHash);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event Paused(address account);
+    event Unpaused(address account);
     
-    constructor() Ownable(msg.sender) {}
+    // Custom modifiers
+    modifier onlyOwner() {
+        require(msg.sender == _owner, "Caller is not the owner");
+        _;
+    }
     
+    modifier whenNotPaused() {
+        require(!_paused, "Contract is paused");
+        _;
+    }
+    
+    modifier whenPaused() {
+        require(_paused, "Contract is not paused");
+        _;
+    }
+    
+    constructor() {
+        _owner = msg.sender;
+        _paused = false;
+    }
+    
+    // Owner management functions
+    function owner() public view returns (address) {
+        return _owner;
+    }
+    
+    function transferOwnership(address newOwner) public onlyOwner {
+        require(newOwner != address(0), "New owner is the zero address");
+        address oldOwner = _owner;
+        _owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+    
+    function renounceOwnership() public onlyOwner {
+        emit OwnershipTransferred(_owner, address(0));
+        _owner = address(0);
+    }
+    
+    // Pausable functions
+    function paused() public view returns (bool) {
+        return _paused;
+    }
+    
+    function pause() public onlyOwner whenNotPaused {
+        _paused = true;
+        emit Paused(msg.sender);
+    }
+    
+    function unpause() public onlyOwner whenPaused {
+        _paused = false;
+        emit Unpaused(msg.sender);
+    }
+    
+    // Patent management functions
     function registerPatent(
         string memory title,
         string memory ipfsHash,
         string memory patentId
-    ) external returns (uint256) {
+    ) external whenNotPaused returns (uint256) {
         require(!_patentIdExists[patentId], "Patent ID already exists");
         require(bytes(title).length > 0, "Title cannot be empty");
         require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
         
-        _patentIds.increment();
-        uint256 newPatentId = _patentIds.current();
+        uint256 newPatentId = nextPatentId;
+        nextPatentId++;
         
         _patents[newPatentId] = Patent({
             title: title,
@@ -78,7 +127,7 @@ contract PatentRegistry is IPatentRegistry, Ownable, Pausable {
         return newPatentId;
     }
     
-    function verifyPatent(uint256 patentId) external onlyOwner {
+    function verifyPatent(uint256 patentId) external onlyOwner whenNotPaused {
         require(_patents[patentId].inventor != address(0), "Patent does not exist");
         require(!_patents[patentId].isVerified, "Patent already verified");
         
@@ -89,10 +138,20 @@ contract PatentRegistry is IPatentRegistry, Ownable, Pausable {
     function updatePatentMetadata(
         uint256 patentId,
         string memory newIpfsHash
-    ) external {
+    ) external whenNotPaused {
         require(_patents[patentId].inventor == msg.sender, "Not the patent owner");
+        require(bytes(newIpfsHash).length > 0, "IPFS hash cannot be empty");
+        
         _patents[patentId].ipfsHash = newIpfsHash;
         emit PatentUpdated(patentId, newIpfsHash);
+    }
+    
+    function setPatentPrice(uint256 patentId, uint256 newPrice) external whenNotPaused {
+        require(_patents[patentId].inventor == msg.sender, "Not the patent owner");
+        require(_patents[patentId].isVerified, "Patent not verified");
+        
+        _patents[patentId].price = newPrice;
+        _patents[patentId].isForSale = newPrice > 0;
     }
     
     function getPatent(uint256 patentId) external view override returns (
@@ -102,7 +161,7 @@ contract PatentRegistry is IPatentRegistry, Ownable, Pausable {
         bool isForSale,
         address inventor,
         uint256 createdAt,
-        string memory patentId,
+        string memory patentIdStr,
         bool isVerified
     ) {
         Patent storage patent = _patents[patentId];
@@ -123,54 +182,12 @@ contract PatentRegistry is IPatentRegistry, Ownable, Pausable {
     function getInventorPatents(address inventor) external view returns (uint256[] memory) {
         return _inventorPatents[inventor];
     }
-}
-
-// PatentFactory.sol
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "./PatentToken.sol";
-
-contract PatentFactory is Ownable {
-    address public patentRegistry;
-    mapping(uint256 => address) public patentTokens;
-    mapping(address => bool) public isPatentToken;
     
-    event PatentTokenCreated(uint256 indexed patentId, address tokenAddress);
-    
-    constructor(address _patentRegistry) Ownable(msg.sender) {
-        patentRegistry = _patentRegistry;
+    function patentExists(string memory patentId) external view returns (bool) {
+        return _patentIdExists[patentId];
     }
     
-    function createPatentToken(
-        string memory name,
-        string memory symbol,
-        uint256 patentId
-    ) external payable returns (address) {
-        require(patentTokens[patentId] == address(0), "Token already exists for patent");
-        
-        PatentToken newToken = new PatentToken{value: msg.value}(
-            name,
-            symbol,
-            patentRegistry,
-            patentId,
-            msg.sender
-        );
-        
-        address tokenAddress = address(newToken);
-        patentTokens[patentId] = tokenAddress;
-        isPatentToken[tokenAddress] = true;
-        
-        emit PatentTokenCreated(patentId, tokenAddress);
-        return tokenAddress;
-    }
-    
-    function getPatentToken(uint256 patentId) external view returns (address) {
-        return patentTokens[patentId];
-    }
-    
-    function updatePatentRegistry(address newRegistry) external onlyOwner {
-        patentRegistry = newRegistry;
+    function getTotalPatents() external view returns (uint256) {
+        return nextPatentId - 1;
     }
 }
