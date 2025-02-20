@@ -1,253 +1,338 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../component/ui/card";
-import { Button } from "../component/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "../component/ui/alert";
-import { Upload, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
-import { ethers } from 'ethers';
-import { CONTRACT_ADDRESSES, PATENT_REGISTRY_ABI } from '../contracts/abis';
+import { usePatent } from './context/patentcontext';
+import { Card } from '../component/ui/card';
+import { Button } from '../component/ui/button';
+import { Alert } from '../component/ui/alert';
+import { 
+  Upload, 
+  AlertCircle,
+  Loader2,
+  FileText,
+  Trash2 
+} from 'lucide-react';
 
 const CATEGORIES = {
   TECH: 'Technology',
   MEDICAL: 'Medical',
   SOFTWARE: 'Software',
   HARDWARE: 'Hardware',
-  CHEMICAL: 'Chemical',
-  MECHANICAL: 'Mechanical',
+  CHEMISTRY: 'Chemistry',
   OTHER: 'Other'
 };
 
-export default function PatentUpload() {
+const PatentUpload = () => {
+  const { uploadPatent, registerPatent, connectWallet, account } = usePatent();
   const navigate = useNavigate();
-  const [selectedFile, setSelectedFile] = useState(null);
+
+  const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentStep, setCurrentStep] = useState('');
-
-  const [patentMetadata, setPatentMetadata] = useState({
+  const [metadata, setMetadata] = useState({
     title: '',
     description: '',
     category: '',
-    keywords: []
+    customId: ''
   });
 
-  const generatePDFPreview = async (file) => {
-    const pdfjsLib = window.pdfjsLib;
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-    
-    return new Promise((resolve, reject) => {
-      const fileReader = new FileReader();
-      
-      fileReader.onload = async function() {
-        try {
-          const typedarray = new Uint8Array(this.result);
-          const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
-          const page = await pdf.getPage(1);
-          
-          const viewport = page.getViewport({ scale: 1.5 });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-          
-          await page.render({
-            canvasContext: context,
-            viewport: viewport
-          }).promise;
-          
-          resolve(canvas.toDataURL('image/jpeg', 0.8));
-        } catch (error) {
-          reject(error);
-        }
-      };
-      
-      fileReader.readAsArrayBuffer(file);
-    });
-  };
+  // Load PDF.js when component mounts
+  useEffect(() => {
+    const loadPdfJs = async () => {
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+      window.pdfjsLib = pdfjsLib;
+    };
+    loadPdfJs();
+  }, []);
 
+  // Connect wallet on mount
+  useEffect(() => {
+    if (!account) {
+      connectWallet().catch(err => {
+        console.error('Wallet connection failed:', err);
+        setError('Please connect your wallet to continue');
+      });
+    }
+  }, [account, connectWallet]);
+
+  const generatePDFPreview = async (file) => {
+    try {
+      // Load PDF.js dynamically
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      
+      // Create array buffer from file
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Load the PDF document
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      
+      // Get the first page
+      const page = await pdf.getPage(1);
+      
+      // Create canvas and set dimensions
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      
+      // Render the PDF page to canvas
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+      
+      // Convert canvas to data URL
+      return canvas.toDataURL('image/jpeg', 0.8);
+    } catch (error) {
+      console.error('PDF preview generation error:', error);
+      return null;
+    }
+  };
+  
+  // Usage in handleFileChange:
   const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      setSelectedFile(file);
+    const selectedFile = e.target.files[0];
+    if (selectedFile && selectedFile.type === 'application/pdf') {
+      setFile(selectedFile);
+      setCurrentStep('Generating preview...');
+      setLoading(true);
+      
       try {
-        const previewImage = await generatePDFPreview(file);
-        setPreview(previewImage);
+        const previewUrl = await generatePDFPreview(selectedFile);
+        if (previewUrl) {
+          setPreview(previewUrl);
+        }
       } catch (err) {
-        setError('Could not generate PDF preview');
+        console.error('Preview generation error:', err);
+        // Still keep the file even if preview fails
+        setError('Failed to generate preview, but file was uploaded successfully');
+      } finally {
+        setLoading(false);
+        setCurrentStep('');
       }
     }
   };
 
-  const handleSubmit = async () => {
-    if (!selectedFile) return;
+
+  const clearFile = () => {
+    setFile(null);
+    setPreview(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!file || !metadata.title || !metadata.customId) return;
+    if (!account) {
+      setError('Please connect your wallet first');
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
-      setCurrentStep('Preparing files...');
 
-      // IPFS'e yükleme simülasyonu
+      // 1. IPFS'e yükle
       setCurrentStep('Uploading to IPFS...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const mockIpfsHash = 'QmXgZh7QdQweR' + Math.random().toString(36).substr(2, 9);
+      const ipfsHash = await uploadPatent(file, metadata);
 
-      setCurrentStep('Registering patent on blockchain...');
-      
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const contract = new ethers.Contract(
-        CONTRACT_ADDRESSES.PatentRegistry,
-        PATENT_REGISTRY_ABI,
-        signer
+      // 2. Kontrata kaydet
+      setCurrentStep('Registering on blockchain...');
+      const patentId = await registerPatent(
+        metadata.title,
+        ipfsHash,
+        metadata.customId
       );
 
-      const tx = await contract.registerPatent(
-        patentMetadata.title,
-        mockIpfsHash,
-        Date.now().toString()
-      );
-      await tx.wait();
-
-      setCurrentStep('Patent registration complete!');
+      // 3. Başarılı yükleme
+      setCurrentStep('Upload completed!');
       setTimeout(() => {
-        navigate('/patents');
+        navigate(`/patents`);
       }, 2000);
 
     } catch (err) {
-      console.error('Registration error:', err);
-      setError(err.message || 'Failed to register patent');
+      console.error('Upload error:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
-      setCurrentStep('');
     }
   };
 
   return (
-    <Card className="max-w-3xl mx-auto">
-      <CardHeader className="bg-gradient-to-r from-blue-700 to-blue-900 text-white">
-        <CardTitle className="text-2xl">Patent Registration</CardTitle>
-        <CardDescription className="text-gray-200">Register your patent on the blockchain</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6 pt-6">
-        {error && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+    <div className="max-w-3xl mx-auto p-6">
+      <Card className="bg-white shadow-lg">
+        <div className="p-6">
+          <h2 className="text-2xl font-bold mb-6">Upload Patent</h2>
 
-        {/* File Upload Section */}
-        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-          <input
-            id="patent-upload"
-            type="file"
-            accept=".pdf"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <label
-            htmlFor="patent-upload"
-            className="flex flex-col items-center cursor-pointer"
-          >
-            {preview ? (
-              <div className="max-w-md mx-auto">
-                <img
-                  src={preview}
-                  alt="Patent Preview"
-                  className="max-h-48 object-contain rounded shadow-lg"
+          {error && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <span>{error}</span>
+            </Alert>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* File Upload */}
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center relative">
+              <input
+                id="file-upload"
+                type="file"
+                accept=".pdf"
+                onChange={handleFileChange}
+                className="hidden"
+                disabled={loading}
+              />
+              <label 
+                htmlFor="file-upload" 
+                className={`cursor-pointer block ${loading ? 'opacity-50' : ''}`}
+              >
+                {preview ? (
+                  <div className="flex flex-col items-center">
+                    <img
+                      src={preview}
+                      alt="Preview"
+                      className="max-h-48 mb-4 object-contain"
+                    />
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      <span className="text-sm text-gray-500">{file.name}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          clearFile();
+                        }}
+                        className="ml-2"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <Upload className="w-12 h-12 text-gray-400 mb-2" />
+                    <span className="text-gray-500">
+                      Click to upload PDF
+                    </span>
+                  </div>
+                )}
+              </label>
+            </div>
+
+            {/* Metadata Form */}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Patent Title
+                </label>
+                <input
+                  type="text"
+                  className="w-full p-2 border rounded"
+                  value={metadata.title}
+                  onChange={(e) => setMetadata({
+                    ...metadata,
+                    title: e.target.value
+                  })}
+                  required
                 />
-                <p className="mt-2 text-sm text-gray-600">{selectedFile.name}</p>
               </div>
-            ) : (
-              <>
-                <Upload className="w-12 h-12 mb-2 text-blue-600" />
-                <span className="text-gray-700 font-medium">
-                  Click to upload patent document (PDF)
-                </span>
-              </>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Description
+                </label>
+                <textarea
+                  className="w-full p-2 border rounded"
+                  rows={4}
+                  value={metadata.description}
+                  onChange={(e) => setMetadata({
+                    ...metadata,
+                    description: e.target.value
+                  })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Category
+                </label>
+                <select
+                  className="w-full p-2 border rounded"
+                  value={metadata.category}
+                  onChange={(e) => setMetadata({
+                    ...metadata,
+                    category: e.target.value
+                  })}
+                  required
+                >
+                  <option value="">Select Category</option>
+                  {Object.entries(CATEGORIES).map(([key, value]) => (
+                    <option key={key} value={key}>{value}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Custom Patent ID
+                </label>
+                <input
+                  type="text"
+                  className="w-full p-2 border rounded"
+                  value={metadata.customId}
+                  onChange={(e) => setMetadata({
+                    ...metadata,
+                    customId: e.target.value
+                  })}
+                  placeholder="e.g., PAT2024-001"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Loading State */}
+            {loading && (
+              <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{currentStep}</span>
+              </div>
             )}
-          </label>
+
+            {/* Submit Button */}
+            <div className="flex gap-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => navigate('/patents')}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={!file || !metadata.title || loading}
+              >
+                {loading ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : (
+                  <FileText className="w-4 h-4 mr-2" />
+                )}
+                {loading ? 'Processing...' : 'Upload Patent'}
+              </Button>
+            </div>
+          </form>
         </div>
-
-        {/* Metadata Form */}
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Title</label>
-            <input
-              type="text"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-              value={patentMetadata.title}
-              onChange={(e) => setPatentMetadata(prev => ({
-                ...prev,
-                title: e.target.value
-              }))}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Category</label>
-            <select
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-              value={patentMetadata.category}
-              onChange={(e) => setPatentMetadata(prev => ({
-                ...prev,
-                category: e.target.value
-              }))}
-            >
-              <option value="">Select a category</option>
-              {Object.entries(CATEGORIES).map(([key, value]) => (
-                <option key={key} value={key}>{value}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Description</label>
-            <textarea
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-              rows={4}
-              value={patentMetadata.description}
-              onChange={(e) => setPatentMetadata(prev => ({
-                ...prev,
-                description: e.target.value
-              }))}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Keywords</label>
-            <input
-              type="text"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-              placeholder="Enter keywords separated by commas"
-              onChange={(e) => setPatentMetadata(prev => ({
-                ...prev,
-                keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean)
-              }))}
-            />
-          </div>
-        </div>
-
-        {/* Loading State */}
-        {loading && (
-          <div className="flex items-center justify-center space-x-2 py-4">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span className="text-sm text-gray-600">{currentStep}</span>
-          </div>
-        )}
-
-        {/* Submit Button */}
-        <Button
-          onClick={handleSubmit}
-          disabled={!selectedFile || !patentMetadata.title || loading}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          {loading ? 'Processing...' : 'Register Patent'}
-        </Button>
-      </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
-}
+};
+
+export default PatentUpload;
