@@ -1,113 +1,256 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract PatentToken is ERC721, ERC721URIStorage, Pausable, Ownable {
-    struct Patent {
-        string ipfsHash;        // IPFS hash of patent documents
-        uint256 price;         // Current price in wei
-        bool isForSale;        // Whether patent is listed for sale
-        address inventor;      // Original patent holder
-        uint256 createdAt;    // Timestamp of tokenization
-        string patentId;      // Original patent ID
-    }
-    
-    mapping(uint256 => Patent) public patents;
-    uint256 private _tokenIds;
-    
-    event PatentTokenized(uint256 tokenId, address inventor, string patentId);
-    event PatentListed(uint256 tokenId, uint256 price);
-    event PatentSold(uint256 tokenId, address from, address to, uint256 price);
-    
-    constructor() ERC721("Patent Token", "PAT") {}
-    
-    function pause() public onlyOwner {
-        _pause();
-    }
-    
-    function unpause() public onlyOwner {
-        _unpause();
-    }
-    
-    function tokenizePatent(
+interface IPatentRegistry {
+    function getPatent(uint256 patentId) external view returns (
+        string memory title,
         string memory ipfsHash,
-        string memory patentId
-    ) public returns (uint256) {
-        _tokenIds++;
-        uint256 newTokenId = _tokenIds;
+        uint256 price,
+        bool isForSale,
+        address inventor,
+        uint256 createdAt,
+        string memory patentId,
+        bool isVerified
+    );
+}
+
+contract PatentToken is ERC20, Ownable, ReentrancyGuard {
+    using Math for uint256;
+
+    // Constants
+    uint256 public constant MAX_SUPPLY = 1_000_000 * 10**18;
+    uint256 public constant MIN_PRICE = 1e10;
+    uint256 public constant MIN_LIQUIDITY = 0.1 ether;
+    
+    // Patent specific details
+    struct Patent {
+        string title;
+        string ipfsHash;
+        uint256 price;
+        bool isForSale;
+        address inventor;
+        uint256 createdAt;
+        string patentId;
+        bool isVerified;
+    }
+    
+    // State variables
+    uint256 public basePrice;
+    uint256 public currentPrice;
+    address public immutable patentRegistryAddress;
+    uint256 public immutable patentId;
+    Patent public patentDetails;
+    uint256 public liquidityPool;
+    uint256 public volume24h;
+    uint256 public lastPriceUpdate;
+    uint256 public holdersCount;
+    bool public isTrading;
+
+    // Trading history
+    struct TradeMetrics {
+        uint256 timestamp;
+        uint256 price;
+        uint256 volume;
+    }
+    
+    TradeMetrics[] public tradeHistory;
+    mapping(address => uint256) public userTrades;
+
+    // Events
+    event TokensPurchased(address indexed buyer, uint256 amount, uint256 price);
+    event TokensSold(address indexed seller, uint256 amount, uint256 price);
+    event PriceUpdated(uint256 oldPrice, uint256 newPrice, uint256 timestamp);
+    event LiquidityAdded(address indexed provider, uint256 amount);
+    event LiquidityRemoved(address indexed provider, uint256 amount);
+    event PatentDetailsUpdated(string ipfsHash, uint256 price);
+
+    constructor(
+        string memory name,
+        string memory symbol,
+        address _patentRegistryAddress,
+        uint256 _patentId,
+        address initialOwner
+    ) payable ERC20(name, symbol) Ownable(initialOwner) {
+        require(msg.value >= MIN_LIQUIDITY, "Insufficient initial liquidity");
         
-        _safeMint(msg.sender, newTokenId);
-        _setTokenURI(newTokenId, ipfsHash);
-        
-        patents[newTokenId] = Patent({
+        basePrice = MIN_PRICE;
+        currentPrice = basePrice;
+        patentRegistryAddress = _patentRegistryAddress;
+        patentId = _patentId;
+        isTrading = true;
+        lastPriceUpdate = block.timestamp;
+
+        // Initialize liquidity and mint tokens
+        liquidityPool = msg.value;
+        _mint(address(this), MAX_SUPPLY / 2);
+        _mint(initialOwner, MAX_SUPPLY / 2);
+
+        // Fetch initial patent details
+        IPatentRegistry registry = IPatentRegistry(_patentRegistryAddress);
+        (
+            string memory title,
+            string memory ipfsHash,
+            uint256 price,
+            bool isForSale,
+            address inventor,
+            uint256 createdAt,
+            string memory patentIdStr,
+            bool isVerified
+        ) = registry.getPatent(_patentId);
+
+        patentDetails = Patent({
+            title: title,
             ipfsHash: ipfsHash,
-            price: 0,
-            isForSale: false,
-            inventor: msg.sender,
-            createdAt: block.timestamp,
-            patentId: patentId
+            price: price,
+            isForSale: isForSale,
+            inventor: inventor,
+            createdAt: createdAt,
+            patentId: patentIdStr,
+            isVerified: isVerified
         });
-        
-        emit PatentTokenized(newTokenId, msg.sender, patentId);
-        return newTokenId;
-    }
-    
-    function listPatentForSale(uint256 tokenId, uint256 price) public {
-        require(ownerOf(tokenId) == msg.sender, "Not the patent owner");
-        require(price > 0, "Price must be greater than 0");
-        
-        patents[tokenId].isForSale = true;
-        patents[tokenId].price = price;
-        
-        emit PatentListed(tokenId, price);
-    }
-    
-    function buyPatent(uint256 tokenId) public payable {
-        Patent storage patent = patents[tokenId];
-        require(patent.isForSale, "Patent not for sale");
-        require(msg.value >= patent.price, "Insufficient payment");
-        
-        address seller = ownerOf(tokenId);
-        _transfer(seller, msg.sender, tokenId);
-        
-        // Reset sale status
-        patent.isForSale = false;
-        
-        // Transfer payment to seller
-        payable(seller).transfer(msg.value);
-        
-        emit PatentSold(tokenId, seller, msg.sender, msg.value);
-    }
-    
-    function updatePatentMetadata(uint256 tokenId, string memory newIpfsHash) public {
-        require(ownerOf(tokenId) == msg.sender, "Not the patent owner");
-        patents[tokenId].ipfsHash = newIpfsHash;
-        _setTokenURI(tokenId, newIpfsHash);
-    }
-    
-    // Override required functions
-    function _beforeTokenTransfer(address from, address to, uint256 tokenId, uint256 batchSize)
-        internal
-        whenNotPaused
-        override
-    {
-        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+
+        emit LiquidityAdded(msg.sender, msg.value);
     }
 
-    function _burn(uint256 tokenId) internal override(ERC721, ERC721URIStorage) {
-        super._burn(tokenId);
+    function calculatePrice(uint256 amount, bool isBuy) public view returns (uint256) {
+        require(amount > 0, "Amount must be greater than 0");
+        uint256 reserve = balanceOf(address(this));
+        uint256 scalingFactor = 1e18;
+        uint256 priceIncrease = (amount * scalingFactor) / (reserve + 1);
+        uint256 finalPrice = MIN_PRICE + priceIncrease;
+        return finalPrice;
     }
 
-    function tokenURI(uint256 tokenId)
-        public
-        view
-        override(ERC721, ERC721URIStorage)
-        returns (string memory)
-    {
-        return super.tokenURI(tokenId);
+    function buyTokens(uint256 amount) external payable nonReentrant {
+        require(isTrading, "Trading is paused");
+        require(amount > 0, "Amount must be greater than 0");
+        require(patentDetails.isForSale, "Patent not for sale");
+        
+        uint256 liquidityTokens = balanceOf(address(this));
+        require(amount <= liquidityTokens, "Insufficient liquidity");
+        
+        uint256 price = calculatePrice(amount, true);
+        uint256 totalCost = (amount * price) / 10**18;
+        require(msg.value >= totalCost, "Insufficient payment");
+
+        _transfer(address(this), msg.sender, amount);
+        
+        // Update trading metrics
+        tradeHistory.push(TradeMetrics({
+            timestamp: block.timestamp,
+            price: price,
+            volume: amount
+        }));
+        
+        currentPrice = price;
+        lastPriceUpdate = block.timestamp;
+        volume24h += amount;
+        
+        if (balanceOf(msg.sender) == amount) {
+            holdersCount++;
+        }
+        
+        // Handle liquidity
+        liquidityPool += totalCost;
+        
+        if (msg.value > totalCost) {
+            payable(msg.sender).transfer(msg.value - totalCost);
+        }
+        
+        emit TokensPurchased(msg.sender, amount, price);
+        emit PriceUpdated(currentPrice, price, block.timestamp);
     }
+
+    function sellTokens(uint256 amount) external nonReentrant {
+        require(isTrading, "Trading is paused");
+        require(amount > 0, "Amount must be greater than 0");
+        require(balanceOf(msg.sender) >= amount, "Insufficient balance");
+        require(liquidityPool > 0, "No liquidity");
+        
+        uint256 price = calculatePrice(amount, false);
+        uint256 saleProceeds = (amount * price) / 10**18;
+        require(liquidityPool >= saleProceeds, "Insufficient liquidity for sale");
+        
+        _transfer(msg.sender, address(this), amount);
+        
+        currentPrice = price;
+        lastPriceUpdate = block.timestamp;
+        volume24h += amount;
+        
+        if (balanceOf(msg.sender) == 0) {
+            holdersCount--;
+        }
+        
+        tradeHistory.push(TradeMetrics({
+            timestamp: block.timestamp,
+            price: price,
+            volume: amount
+        }));
+        
+        liquidityPool -= saleProceeds;
+        payable(msg.sender).transfer(saleProceeds);
+        
+        emit TokensSold(msg.sender, amount, price);
+        emit PriceUpdated(currentPrice, price, block.timestamp);
+    }
+
+    // Admin functions
+    function updatePatentDetails(string memory newIpfsHash, uint256 newPrice) external onlyOwner {
+        patentDetails.ipfsHash = newIpfsHash;
+        patentDetails.price = newPrice;
+        emit PatentDetailsUpdated(newIpfsHash, newPrice);
+    }
+
+    function setPatentForSale(bool forSale) external onlyOwner {
+        patentDetails.isForSale = forSale;
+    }
+
+    function withdrawExcessLiquidity(uint256 amount) external onlyOwner {
+        require(liquidityPool > MIN_LIQUIDITY + amount, "Insufficient excess liquidity");
+        liquidityPool -= amount;
+        payable(owner()).transfer(amount);
+    }
+
+    // View functions
+    function getPatentDetails() external view returns (Patent memory) {
+        return patentDetails;
+    }
+
+    function getTradeHistory(uint256 count) external view returns (TradeMetrics[] memory) {
+        uint256 historyLength = tradeHistory.length;
+        uint256 resultCount = Math.min(count, historyLength);
+        TradeMetrics[] memory result = new TradeMetrics[](resultCount);
+        
+        for (uint256 i = 0; i < resultCount; i++) {
+            result[i] = tradeHistory[historyLength - resultCount + i];
+        }
+        
+        return result;
+    }
+
+    function getTokenMetrics() external view returns (
+        uint256 _currentPrice,
+        uint256 _basePrice,
+        uint256 _liquidityPool,
+        uint256 _volume24h,
+        uint256 _holdersCount,
+        bool _isTrading
+    ) {
+        return (
+            currentPrice,
+            basePrice,
+            liquidityPool,
+            volume24h,
+            holdersCount,
+            isTrading
+        );
+    }
+
+    receive() external payable {}
+    fallback() external payable {}
 }
