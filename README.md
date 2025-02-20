@@ -19,11 +19,11 @@
 </p>
 
 
-This repository contains a **web-based platform** that enables patent holders to tokenize their patents, breaking them down into smaller, tradeable units using **Unit Test Tokens (UTTs)**. The system facilitates decentralized ownership, licensing, and sales of patent rights in a transparent and efficient manner.
+This repository contains a **web-based platform** that enables patent holders to tokenize their patents, breaking them down into smaller, tradeable units using **Units Network (UNITO)**. The system facilitates decentralized ownership, licensing, and sales of patent rights in a transparent and efficient manner.
 
 ## 🌟 Features
 - **Patent Tokenization** – Convert patents into fractionalized tokens for sale.
-- **Units Network Token (UNITO) Mechanism** – Patents are divided into UTTs, allowing for easy purchase, trading, and licensing.
+- **Units Network (UNITO) Mechanism** – Patents are divided into UNITOs, allowing for easy purchase, trading, and licensing.
 - **Smart Contracts & Blockchain Integration** – Ensures secure and verifiable ownership transfers.
 - **Web-Based Dashboard** – Intuitive UI for managing tokenized patents and transactions.
 - **Payment & Licensing Options** – Supports various methods for acquiring patents or licensing rights.
@@ -38,33 +38,6 @@ This repository contains a **web-based platform** that enables patent holders to
 ### Prerequisites
 - Node.js & npm installed
 - MetaMask or other Web3 wallet
-
-### Steps
-1. **Clone the repository**
-   ```sh
-   git clone https://github.com/your-username/patent-tokenization.git
-   cd patent-tokenization
-   ```
-2. **Install dependencies**
-   ```sh
-   npm install  # For frontend
-   pip install -r requirements.txt  # If using Python backend
-   ```
-3. **Start the development server**
-   ```sh
-   npm start  # Runs frontend
-   flask run  # Runs backend if using Flask
-   ```
-4. **Deploy smart contracts**
-   ```sh
-   npx hardhat run scripts/deploy.js --network rinkeby
-   ```
-
-## 📜 Smart Contract Overview
-The platform uses **Solidity-based smart contracts** to tokenize patents and manage transactions. The contract includes:
-- `MintPatentToken` – Converts a patent into tokenized units.
-- `BuyTokenUnit` – Allows users to purchase specific UNITO.
-- `TransferOwnership` – Enables resale and transfer of patent tokens.
 
 ## 📌 Usage
 1. **Register/Login** to access the dashboard.
