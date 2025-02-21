@@ -1,22 +1,25 @@
-// src/components/StakeModal.jsx
-
 import React, { useState } from 'react';
-import { ethers } from 'ethers';
-import { usePatent } from '../context/patentcontext';
-import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '../ui/dialog';
-import { Button } from '../ui/button';
-import { Alert } from '../ui/alert';
+import { usePatent } from './context/patentcontext';
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from './ui/dialog';
+import { Button } from './ui/button';
+import { Alert } from './ui/alert';
 import { Loader2, Shield } from 'lucide-react';
 
 const StakeModal = ({ patent, isOpen, onClose }) => {
   const { stakeTokens } = usePatent();
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState('1000'); // Default to minimum amount
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   const handleStake = async () => {
-    if (!amount || parseFloat(amount) < 1000) {
+    if (!amount || !patent) {
+      setError('Invalid input parameters');
+      return;
+    }
+
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount < 1000) {
       setError('Minimum stake amount is 1000 tokens');
       return;
     }
@@ -24,14 +27,26 @@ const StakeModal = ({ patent, isOpen, onClose }) => {
     try {
       setLoading(true);
       setError('');
-      
-      const amountWei = ethers.utils.parseEther(amount);
-      const nftId = await stakeTokens(patent.tokenAddress, amountWei);
+
+      console.log('Staking tokens...', {
+        patentId: patent.id,
+        tokenAddress: patent.tokenAddress,
+        amount: parsedAmount
+      });
+
+      const tokenId = await stakeTokens(
+        patent.id,
+        patent.tokenAddress,
+        parsedAmount
+      );
+
+      console.log('Staking successful, token ID:', tokenId);
       
       setSuccess(true);
       setTimeout(() => {
         onClose();
         setSuccess(false);
+        setAmount('1000');
       }, 2000);
     } catch (err) {
       console.error('Staking error:', err);
@@ -51,7 +66,7 @@ const StakeModal = ({ patent, isOpen, onClose }) => {
           <DialogDescription>
             {success 
               ? 'Your NFT has been minted and sent to your wallet.'
-              : 'Stake 1000 or more tokens to receive the patent NFT in your wallet.'
+              : `Stake 1000 or more tokens of ${patent?.title || ''} to receive the patent NFT in your wallet.`
             }
           </DialogDescription>
         </DialogHeader>

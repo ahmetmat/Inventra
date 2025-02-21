@@ -7,21 +7,28 @@ async function main() {
   // Deploy PatentRegistry
   const PatentRegistry = await ethers.getContractFactory("PatentRegistry");
   const registry = await PatentRegistry.deploy();
-  await registry.waitForDeployment();  // <- Burada değişiklik yaptık
+  await registry.waitForDeployment();
   console.log("PatentRegistry deployed to:", await registry.getAddress());
 
   // Deploy PatentFactory
   const PatentFactory = await ethers.getContractFactory("PatentFactory");
   const factory = await PatentFactory.deploy(await registry.getAddress());
-  await factory.waitForDeployment();  // <- Burada değişiklik yaptık
+  await factory.waitForDeployment();
   console.log("PatentFactory deployed to:", await factory.getAddress());
 
-  // Contract addresses'leri kaydet
+  // Deploy PatentStaking
+  const PatentStaking = await ethers.getContractFactory("PatentStaking");
+  const staking = await PatentStaking.deploy(await factory.getAddress());
+  await staking.waitForDeployment();
+  console.log("PatentStaking deployed to:", await staking.getAddress());
+
+  // Print all addresses in format ready to copy
   console.log("\nContract Addresses:");
   console.log("===================");
   console.log(`export const CONTRACT_ADDRESSES = {`);
-  console.log(`  registry: "${await registry.getAddress()}",`);
-  console.log(`  factory: "${await factory.getAddress()}"`);
+  console.log(`  PatentRegistry: "${await registry.getAddress()}",`);
+  console.log(`  PatentFactory: "${await factory.getAddress()}",`);
+  console.log(`  PatentStaking: "${await staking.getAddress()}"`);
   console.log(`};`);
 }
 

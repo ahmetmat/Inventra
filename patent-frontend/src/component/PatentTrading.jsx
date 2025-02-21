@@ -5,6 +5,7 @@ import { Card } from '../component/ui/card';
 import { Button } from '../component/ui/button';
 import { Alert } from '../component/ui/alert';
 import { ethers } from 'ethers';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import TradingViewChart from './TradingViewChart';
 import {
   Loader2,
@@ -28,7 +29,7 @@ const PATENT_TOKEN_ABI = [
 const PatentTrading = () => {
   const { patentId } = useParams();
   const navigate = useNavigate();
-  const { getPatentDetails, getPatentToken, account, connectWallet } = usePatent();
+  const { patentRegistry, patentFactory, account, connectWallet } = usePatent();
 
   const [patent, setPatent] = useState(null);
   const [tokenContract, setTokenContract] = useState(null);
@@ -40,56 +41,53 @@ const PatentTrading = () => {
   const [estimatedCost, setEstimatedCost] = useState(null);
   const [isTokenHolder, setIsTokenHolder] = useState(false);
 
-  // Wallet bağlantısını ve veri yüklemeyi yönet
-  useEffect(() => {
-    const initialize = async () => {
-      try {
-        if (!window.ethereum) {
-          throw new Error('Please install MetaMask to trade tokens');
-        }
-
-        if (!account) {
-          await connectWallet();
-        }
-
-        await loadPatentData();
-      } catch (err) {
-        console.error('Initialization error:', err);
-        setError(err.message);
-      }
-    };
-
-    initialize();
-  }, [patentId, account]);
-
   const loadPatentData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      if (!account) {
-        throw new Error('Please connect your wallet to trade');
+      // Verify contracts are initialized
+      if (!patentRegistry || !patentFactory) {
+        throw new Error('Contracts not initialized. Please try again.');
       }
 
-      const patentDetails = await getPatentDetails(patentId);
-      setPatent(patentDetails);
-
-      const tokenAddress = await getPatentToken(patentId);
+      // Get patent details
+      const patentDetails = await patentRegistry.getPatent(patentId);
+      const tokenAddress = await patentFactory.getPatentToken(patentId);
       
+      setPatent({
+        id: patentId,
+        title: patentDetails[0],
+        ipfsHash: patentDetails[1],
+        price: patentDetails[2],
+        isForSale: patentDetails[3],
+        inventor: patentDetails[4],
+        createdAt: patentDetails[5],
+        patentId: patentDetails[6],
+        isVerified: patentDetails[7],
+        tokenAddress
+      });
+
       if (!tokenAddress || tokenAddress === ethers.constants.AddressZero) {
         throw new Error('No token found for this patent');
       }
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      await provider.send("eth_requestAccounts", []); // Explicit connection request
-      const signer = provider.getSigner();
-      const contract = new ethers.Contract(tokenAddress, PATENT_TOKEN_ABI, signer);
-      setTokenContract(contract);
+      // Initialize token contract
+      if (window.ethereum) {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = provider.getSigner();
+        const contract = new ethers.Contract(tokenAddress, PATENT_TOKEN_ABI, signer);
+        setTokenContract(contract);
 
-      await updateTokenMetrics(contract);
+        // Load token metrics
+        await updateTokenMetrics(contract);
 
-      const balance = await contract.balanceOf(account);
-      setIsTokenHolder(balance.gt(ethers.constants.Zero));
+        // Check if user holds tokens
+        if (account) {
+          const balance = await contract.balanceOf(account);
+          setIsTokenHolder(balance.gt(ethers.constants.Zero));
+        }
+      }
 
     } catch (err) {
       console.error('Failed to load patent data:', err);
@@ -120,6 +118,52 @@ const PatentTrading = () => {
       console.error('Failed to update metrics:', err);
       setError('Failed to load token metrics');
     }
+  };
+
+  // Initialize component
+  useEffect(() => {
+    const initialize = async () => {
+      try {
+        if (!window.ethereum) {
+          throw new Error('Please install MetaMask to trade tokens');
+        }
+
+        if (!account) {
+          await connectWallet();
+        }
+
+        await loadPatentData();
+      } catch (err) {
+        console.error('Initialization error:', err);
+        setError(err.message);
+      }
+    };
+
+    initialize();
+  }, [patentId, account, patentRegistry, patentFactory]);
+
+  const renderPriceChart = () => {
+    if (!tokenMetrics || !tradeHistory) return null;
+
+    return (
+      <Card className="bg-white shadow-lg p-6">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold">Price History</h3>
+        </div>
+        <LineChart width={600} height={300} data={tradeHistory}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="time" />
+          <YAxis />
+          <Tooltip />
+          <Line 
+            type="monotone" 
+            dataKey="price" 
+            stroke="#8884d8" 
+            dot={false}
+          />
+        </LineChart>
+      </Card>
+    );
   };
 
   const calculateTradePrice = async (amount) => {
