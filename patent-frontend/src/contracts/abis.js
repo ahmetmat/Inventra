@@ -89,8 +89,9 @@ export const PATENT_TOKEN_ABI = [
   "event Transfer(address indexed from, address indexed to, uint256 value)",
   "event Approval(address indexed owner, address indexed spender, uint256 value)"
 ];
+
 export const PATENT_STAKING_ABI = [
-  "function stake(address patentToken, uint256 amount) external",
+  "function stake(address patentToken, uint256 amount, string patentTitle, string imageUrl) external",
   "function unstake(uint256 tokenId) external",
   "function stakedAmount(uint256 tokenId) external view returns (uint256)",
   "function nextTokenId(address patentToken) external view returns (uint256)",
@@ -101,7 +102,7 @@ export const PATENT_STAKING_ABI = [
 
 // Contract addresses
 export const CONTRACT_ADDRESSES = {
-  PatentRegistry: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  PatentFactory: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  PatentStaking: "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+  PatentRegistry: "0x217B9a2139576844b3A232aBEF0D236fE894E27d",
+  PatentFactory: "0xE4dBeAFa9065bD8050117387087f34adfA25BfAc",
+  PatentStaking: "0x665bcC4D12a376921C23db4894f6354D1B5D3127"
 };

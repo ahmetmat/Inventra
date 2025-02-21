@@ -5,19 +5,28 @@ import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Base64.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
 contract PatentStaking is ERC721, ReentrancyGuard, Ownable {
+    using Strings for uint256;
+
     // State variables
     address public immutable patentFactory;
     uint256 public constant STAKE_REQUIREMENT = 1000 * 10**18; // 1000 tokens
     
-    // Mapping from token ID to staked amount
-    mapping(uint256 => uint256) public stakedAmount;
+    struct StakeInfo {
+        uint256 amount;
+        address patentToken;
+        string patentTitle;
+        string imageUrl;
+    }
     
-    // Mapping from patent token to next available NFT ID
+    // Mappings
+    mapping(uint256 => StakeInfo) public stakes;
     mapping(address => uint256) public nextTokenId;
     
-    // Event declarations
+    // Events
     event Staked(address indexed user, address indexed patentToken, uint256 amount, uint256 nftId);
     event Unstaked(address indexed user, address indexed patentToken, uint256 amount, uint256 nftId);
 
@@ -26,7 +35,12 @@ contract PatentStaking is ERC721, ReentrancyGuard, Ownable {
         patentFactory = _patentFactory;
     }
 
-    function stake(address patentToken, uint256 amount) external nonReentrant {
+    function stake(
+        address patentToken,
+        uint256 amount,
+        string memory patentTitle,
+        string memory imageUrl
+    ) external nonReentrant {
         require(amount >= STAKE_REQUIREMENT, "Must stake at least 1000 tokens");
         require(IERC20(patentToken).transferFrom(msg.sender, address(this), amount), "Transfer failed");
         
@@ -34,46 +48,7 @@ contract PatentStaking is ERC721, ReentrancyGuard, Ownable {
         uint256 tokenId = nextTokenId[patentToken]++;
         _mint(msg.sender, tokenId);
         
-        // Record staked amount
-        stakedAmount[tokenId] = amount;
-        
-        emit Staked(msg.sender, patentToken, amount, tokenId);
-    }
-    // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
-
-contract PatentStaking is ERC721 {
-    using Strings for uint256;
-
-    struct StakeInfo {
-        uint256 amount;
-        address patentToken;
-        string patentTitle;
-        string imageUrl;  // IPFS URL for the patent image
-    }
-
-    mapping(uint256 => StakeInfo) public stakes;
-    mapping(address => uint256) public nextTokenId;
-    
-    event Staked(address indexed user, address indexed patentToken, uint256 amount, uint256 nftId);
-    
-    constructor() ERC721("Patent Usage Rights", "PUR") {}
-
-    function stake(
-        address patentToken,
-        uint256 amount,
-        string memory patentTitle,
-        string memory imageUrl
-    ) external returns (uint256) {
-        require(amount >= 1000 * 10**18, "Must stake at least 1000 tokens");
-        require(IERC20(patentToken).transferFrom(msg.sender, address(this), amount), "Transfer failed");
-        
-        uint256 tokenId = nextTokenId[patentToken]++;
-        
+        // Store stake information
         stakes[tokenId] = StakeInfo({
             amount: amount,
             patentToken: patentToken,
@@ -81,10 +56,28 @@ contract PatentStaking is ERC721 {
             imageUrl: imageUrl
         });
         
-        _mint(msg.sender, tokenId);
-        
         emit Staked(msg.sender, patentToken, amount, tokenId);
-        return tokenId;
+    }
+    
+    function unstake(uint256 tokenId) external nonReentrant {
+        require(ownerOf(tokenId) == msg.sender, "Not the NFT owner");
+        
+        StakeInfo memory stakeInfo = stakes[tokenId];
+        
+        // Burn NFT
+        _burn(tokenId);
+        
+        // Return staked tokens
+        require(IERC20(stakeInfo.patentToken).transfer(msg.sender, stakeInfo.amount), "Transfer failed");
+        
+        delete stakes[tokenId];
+        
+        emit Unstaked(msg.sender, stakeInfo.patentToken, stakeInfo.amount, tokenId);
+    }
+    
+    function getPatentTokenForNFT(uint256 tokenId) public view returns (address) {
+        require(_exists(tokenId), "Token does not exist");
+        return stakes[tokenId].patentToken;
     }
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
@@ -108,27 +101,7 @@ contract PatentStaking is ERC721 {
             )
         );
     }
-}
-    function unstake(uint256 tokenId) external nonReentrant {
-        require(ownerOf(tokenId) == msg.sender, "Not the NFT owner");
-        
-        uint256 amount = stakedAmount[tokenId];
-        address patentToken = getPatentTokenForNFT(tokenId);
-        
-        // Burn NFT
-        _burn(tokenId);
-        
-        // Return staked tokens
-        require(IERC20(patentToken).transfer(msg.sender, amount), "Transfer failed");
-        
-        delete stakedAmount[tokenId];
-        
-        emit Unstaked(msg.sender, patentToken, amount, tokenId);
-    }
-    
-    function getPatentTokenForNFT(uint256 tokenId) public view returns (address) {
-        // Implementation depends on how you want to map NFTs to patent tokens
-        // This is a simplified version
-        return address(uint160(tokenId >> 96));
+     function _exists(uint256 tokenId) internal view returns (bool) {
+        return _ownerOf(tokenId) != address(0);
     }
 }

@@ -59,9 +59,13 @@ const PatentList = () => {
 
   const handleViewPatent = async (patent) => {
     try {
+      // Önce patent'in metadata'sını çekiyoruz
       const response = await fetch(`https://magenta-key-rooster-303.mypinata.cloud/ipfs/${patent.ipfsHash}`);
       const metadata = await response.json();
+      // metadata içindeki patentFile değerini kullanarak PDF URL'sini oluşturuyoruz
       const pdfUrl = `https://magenta-key-rooster-303.mypinata.cloud/ipfs/${metadata.patentFile}`;
+      
+      // Yeni sekmede PDF'i açıyoruz
       window.open(pdfUrl, '_blank');
     } catch (err) {
       console.error('Error opening patent:', err);

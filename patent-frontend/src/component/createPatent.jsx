@@ -150,7 +150,7 @@ const PatentUpload = () => {
         ipfsHash,
         metadata.customId
       );
-  
+      localStorage.setItem('ipfshash', JSON.stringify(ipfsHash));
       // 3. Success
       setCurrentStep('Upload completed!');
       setTimeout(() => {

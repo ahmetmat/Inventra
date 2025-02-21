@@ -19,16 +19,17 @@ const config: HardhatUserConfig = {
   },
   networks: {
     hardhat: {
-      chainId: 1337
+      chainId: 88817
     },
-    localhost: {
-      url: "http://127.0.0.1:8545",
-      chainId: 1337
+    unit0: {
+      url: " https://rpc-testnet.unit0.dev",
+      accounts: ["8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"],
+      chainId: 88817
     }
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
-    currency: "USD"
+    currency: "UNIT0"
   }
 };
 

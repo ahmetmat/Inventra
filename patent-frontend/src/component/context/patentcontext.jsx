@@ -134,7 +134,7 @@ export const PatentProvider = ({ children }) => {
     }
   };
 
-  const stakeTokens = async (patentId, tokenAddress, amount) => {
+  const stakeTokens = async (patentId, tokenAddress, amount, ipfsHash) => {
     try {
       if (!patentStaking || !account) {
         throw new Error('Contracts not initialized or wallet not connected');
@@ -143,41 +143,44 @@ export const PatentProvider = ({ children }) => {
       setLoading(true);
       setError('');
   
-      // Create ERC20 contract instance for the patent token
+      console.log('Starting stake process with:', {
+        patentId,
+        tokenAddress,
+        amount,
+        ipfsHash
+      });
+  
+      // Token approval
       const tokenContract = new ethers.Contract(
         tokenAddress,
         ['function approve(address spender, uint256 amount) external returns (bool)'],
         signer
       );
   
-      // Convert amount to Wei if it's not already
-      const amountWei = ethers.utils.isHexString(amount) ? amount : ethers.utils.parseEther(amount.toString());
+      const amountWei = ethers.utils.parseUnits(amount.toString(), 18);
   
-      console.log('Approving tokens...', {
-        spender: CONTRACT_ADDRESSES.PatentStaking,
-        amount: amountWei.toString()
-      });
-  
-      // First approve the staking contract to spend tokens
+      console.log('Approving tokens...');
       const approveTx = await tokenContract.approve(
         CONTRACT_ADDRESSES.PatentStaking,
-        amountWei
+        amountWei,
+        { gasLimit: 100000 }
       );
       await approveTx.wait();
   
-      console.log('Tokens approved, staking...');
-  
-      // Then stake the tokens
-      const stakeTx = await patentStaking.stake(tokenAddress, amountWei);
+      console.log('Staking tokens with IPFS hash:', ipfsHash);
+      const stakeTx = await patentStaking.stake(
+        tokenAddress,
+        amountWei,
+        ipfsHash, // Doğrudan IPFS hash'i gönderiyoruz
+        { gasLimit: 500000 }
+      );
+      
       const receipt = await stakeTx.wait();
-  
-      // Find the Staked event from the receipt
       const event = receipt.events?.find(e => e.event === 'Staked');
       if (!event) throw new Error('Staking event not found in transaction receipt');
   
       const tokenId = event.args.nftId;
   
-      // Update local state
       setStakedTokens(prev => ({
         ...prev,
         [patentId]: {

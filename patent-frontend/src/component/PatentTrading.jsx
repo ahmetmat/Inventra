@@ -79,7 +79,7 @@ const PatentTrading = () => {
         const contract = new ethers.Contract(tokenAddress, PATENT_TOKEN_ABI, signer);
         setTokenContract(contract);
 
-        // Load token metrics
+        // Load token metricsca
         await updateTokenMetrics(contract);
 
         // Check if user holds tokens
@@ -168,15 +168,26 @@ const PatentTrading = () => {
 
   const calculateTradePrice = async (amount) => {
     if (!amount || !tokenContract) return;
+    
     try {
-      const baseAmount = ethers.utils.parseEther(amount.toString());
-      const price = await tokenContract.calculatePrice(baseAmount);
-      setEstimatedCost(price);
+      // Convert amount to smaller number to prevent overflow
+      const amountInWei = ethers.utils.parseUnits(amount, 9); // Use 9 decimals instead of 18
+      console.log('Amount in smaller units:', amountInWei.toString());
+  
+      const pricePerToken = await tokenContract.calculatePrice(amountInWei);
+      console.log('Price per token:', ethers.utils.formatEther(pricePerToken));
+  
+      // Calculate total cost
+      const totalCost = amountInWei.mul(pricePerToken).div(ethers.utils.parseUnits('1', 9));
+      console.log('Calculated total cost:', ethers.utils.formatEther(totalCost));
+  
+      setEstimatedCost(totalCost);
     } catch (err) {
       console.error('Price calculation error:', err);
       setError('Failed to calculate price');
     }
   };
+  
 
   useEffect(() => {
     if (tradeAmount) {
@@ -190,38 +201,82 @@ const PatentTrading = () => {
     try {
       setLoading(true);
       setError(null);
-      const amount = ethers.utils.parseEther(tradeAmount.toString());
-
+  
+      // Use smaller decimals to prevent overflow
+      const amountInWei = ethers.utils.parseUnits(tradeAmount, 9);
+      
       let tx;
       if (tradeType === 'buy') {
-        tx = await tokenContract.buyTokens(amount, {
-          value: estimatedCost,
-          gasLimit: 300000
+        // Get current gas price
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const gasPrice = await provider.getGasPrice();
+        
+        const pricePerToken = await tokenContract.calculatePrice(amountInWei);
+        const totalCost = amountInWei.mul(pricePerToken).div(ethers.utils.parseUnits('1', 9));
+        
+        console.log('Buy transaction details:', {
+          amount: tradeAmount,
+          amountInSmallUnits: amountInWei.toString(),
+          pricePerToken: ethers.utils.formatEther(pricePerToken),
+          totalCost: ethers.utils.formatEther(totalCost),
+          gasPrice: ethers.utils.formatUnits(gasPrice, 'gwei') + ' gwei'
+        });
+  
+        // Add 10% buffer to total cost to account for price changes
+        const costWithBuffer = totalCost.mul(110).div(100);
+  
+        tx = await tokenContract.buyTokens(amountInWei, {
+          value: costWithBuffer,
+          gasLimit: 300000,
+          gasPrice: gasPrice.mul(120).div(100) // Add 20% to current gas price
         });
       } else {
-        tx = await tokenContract.sellTokens(amount, {
+        tx = await tokenContract.sellTokens(amountInWei, {
           gasLimit: 300000
         });
       }
-
-      await tx.wait();
+  
+      console.log('Transaction sent:', tx.hash);
+  
+      const receipt = await tx.wait();
+      console.log('Transaction receipt:', receipt);
+  
+      if (receipt.status === 0) {
+        throw new Error('Transaction failed on blockchain');
+      }
+  
+      // Update UI
       await updateTokenMetrics(tokenContract);
-      
-      // Update token holder status
       const balance = await tokenContract.balanceOf(account);
       setIsTokenHolder(balance.gt(ethers.constants.Zero));
       
       setTradeAmount('');
       setEstimatedCost(null);
-
+  
     } catch (err) {
-      console.error('Trade error:', err);
-      setError(err.message);
+      console.error('Trade error details:', {
+        message: err.message,
+        code: err.code,
+        data: err.data,
+        transaction: err.transaction
+      });
+  
+      let errorMessage = 'Failed to execute trade';
+      if (err.code === 'CALL_EXCEPTION') {
+        if (err.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient funds to complete the transaction';
+        } else if (err.message.includes('gas required exceeds')) {
+          errorMessage = 'Transaction would fail - try a smaller amount';
+        } else {
+          errorMessage = 'Transaction failed - please try again with different parameters';
+        }
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
   };
-
+  
   if (!account) {
     return (
       <div className="max-w-7xl mx-auto p-6">

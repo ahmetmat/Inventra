@@ -1,56 +1,57 @@
 import React, { useState } from 'react';
+import { ethers } from 'ethers';
 import { usePatent } from './context/patentcontext';
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Alert } from './ui/alert';
-import { Loader2, Shield } from 'lucide-react';
+import { Loader2, Shield, AlertCircle } from 'lucide-react';
 
 const StakeModal = ({ patent, isOpen, onClose }) => {
   const { stakeTokens } = usePatent();
-  const [amount, setAmount] = useState('1000'); // Default to minimum amount
+  const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   const handleStake = async () => {
-    if (!amount || !patent) {
-      setError('Invalid input parameters');
-      return;
-    }
-
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount < 1000) {
-      setError('Minimum stake amount is 1000 tokens');
-      return;
-    }
-
     try {
+      if (!amount || parseFloat(amount) < 1000) {
+        setError('Minimum stake amount is 1000 tokens');
+        return;
+      }
+
       setLoading(true);
       setError('');
 
-      console.log('Staking tokens...', {
-        patentId: patent.id,
-        tokenAddress: patent.tokenAddress,
-        amount: parsedAmount
-      });
+      // Get IPFS hash from localStorage
+      const ipfsHash = localStorage.getItem('ipfshash');
+      if (!ipfsHash) {
+        throw new Error('IPFS hash not found');
+      }
 
-      const tokenId = await stakeTokens(
+      console.log('Using IPFS hash:', ipfsHash); // Debug için
+
+      const result = await stakeTokens(
         patent.id,
         patent.tokenAddress,
-        parsedAmount
+        amount,
+        ipfsHash
       );
 
-      console.log('Staking successful, token ID:', tokenId);
-      
+      if (!result) {
+        throw new Error('Staking transaction failed');
+      }
+
       setSuccess(true);
       setTimeout(() => {
         onClose();
         setSuccess(false);
-        setAmount('1000');
+        setAmount('');
       }, 2000);
+
     } catch (err) {
       console.error('Staking error:', err);
-      setError(err.message || 'Failed to stake tokens');
+      setError(err.message || 'Failed to stake tokens. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -58,7 +59,7 @@ const StakeModal = ({ patent, isOpen, onClose }) => {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
             {success ? 'Staking Successful!' : 'Stake Tokens to Get NFT'}
@@ -66,7 +67,7 @@ const StakeModal = ({ patent, isOpen, onClose }) => {
           <DialogDescription>
             {success 
               ? 'Your NFT has been minted and sent to your wallet.'
-              : `Stake 1000 or more tokens of ${patent?.title || ''} to receive the patent NFT in your wallet.`
+              : 'Stake 1000 or more tokens to receive the patent NFT in your wallet.'
             }
           </DialogDescription>
         </DialogHeader>
@@ -82,7 +83,10 @@ const StakeModal = ({ patent, isOpen, onClose }) => {
                 min="1000"
                 step="1"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  setError('');
+                }}
                 className="w-full p-2 border rounded-md"
                 placeholder="Enter amount (min. 1000)"
                 disabled={loading}
@@ -91,7 +95,8 @@ const StakeModal = ({ patent, isOpen, onClose }) => {
 
             {error && (
               <Alert variant="destructive" className="p-3">
-                {error}
+                <AlertCircle className="h-4 w-4 mr-2" />
+                <span>{error}</span>
               </Alert>
             )}
 

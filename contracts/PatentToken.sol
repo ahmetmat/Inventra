@@ -51,6 +51,9 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
     uint256 public holdersCount;
     bool public isTrading;
 
+    // Sanal (virtual) likidite: Fiyat hesaplamasında kullanılacak yüksek bir rezerv değeri
+    uint256 public virtualReserve;
+    
     // Trading history
     struct TradeMetrics {
         uint256 timestamp;
@@ -85,10 +88,14 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         isTrading = true;
         lastPriceUpdate = block.timestamp;
 
-        // Initialize liquidity and mint tokens
+        // Initialize liquidity and mint tokens (ilk dağıtımda gerçek token rezervi kullanılacak ancak
+        // daha sonra mint on-demand yaklaşımı uygulanacak)
         liquidityPool = msg.value;
         _mint(address(this), MAX_SUPPLY / 2);
         _mint(initialOwner, MAX_SUPPLY / 2);
+
+        // Sanal likiditeyi, örneğin 1e24 olarak ayarlıyoruz (ihtiyaç duyduğunuz kadar yüksek belirleyin)
+        virtualReserve = 1e24;
 
         // Fetch initial patent details
         IPatentRegistry registry = IPatentRegistry(_patentRegistryAddress);
@@ -117,55 +124,59 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         emit LiquidityAdded(msg.sender, msg.value);
     }
 
+    // Fiyat hesaplamasını virtualReserve kullanacak şekilde güncelliyoruz
     function calculatePrice(uint256 amount) public view returns (uint256) {
         require(amount > 0, "Amount must be greater than 0");
-        uint256 reserve = balanceOf(address(this));
         uint256 scalingFactor = 1e18;
-        uint256 priceIncrease = (amount * scalingFactor) / (reserve + 1);
+        // Burada gerçek token rezervi yerine virtualReserve kullanılıyor
+        uint256 priceIncrease = (amount * scalingFactor) / (virtualReserve + 1);
         uint256 finalPrice = MIN_PRICE + priceIncrease;
         return finalPrice;
     }
 
-    function buyTokens(uint256 amount) external payable nonReentrant {
-        require(isTrading, "Trading is paused");
-        require(amount > 0, "Amount must be greater than 0");
-        require(patentDetails.isForSale, "Patent not for sale");
-        
-        uint256 liquidityTokens = balanceOf(address(this));
-        require(amount <= liquidityTokens, "Insufficient liquidity");
-        
-        uint256 price = calculatePrice(amount);
-        uint256 totalCost = (amount * price) / 10**18;
-        require(msg.value >= totalCost, "Insufficient payment");
+    // Kullanıcı alım işlemini mint on-demand yöntemiyle gerçekleştiriyoruz
+   function buyTokens(uint256 amount) external payable nonReentrant {
+    require(isTrading, "Trading is paused");
+    require(amount > 0, "Amount must be greater than 0");
+    require(patentDetails.isForSale, "Patent not for sale");
 
-        _transfer(address(this), msg.sender, amount);
-        
-        // Update trading metrics
-        tradeHistory.push(TradeMetrics({
-            timestamp: block.timestamp,
-            price: price,
-            volume: amount
-        }));
-        
-        currentPrice = price;
-        lastPriceUpdate = block.timestamp;
-        volume24h += amount;
-        
-        if (balanceOf(msg.sender) == amount) {
-            holdersCount++;
-        }
-        
-        // Handle liquidity
-        liquidityPool += totalCost;
-        
-        if (msg.value > totalCost) {
-            payable(msg.sender).transfer(msg.value - totalCost);
-        }
-        
-        emit TokensPurchased(msg.sender, amount, price);
-        emit PriceUpdated(currentPrice, price, block.timestamp);
+    uint256 price = calculatePrice(amount);
+    uint256 totalCost = (amount * price) / 10**18;
+    require(msg.value >= totalCost, "Insufficient payment");
+
+    // Contract'ta satış için bulunan tokenleri transfer ediyoruz
+    require(balanceOf(address(this)) >= amount, "Not enough tokens in sale pool");
+    _transfer(address(this), msg.sender, amount);
+
+    tradeHistory.push(TradeMetrics({
+        timestamp: block.timestamp,
+        price: price,
+        volume: amount
+    }));
+    
+    uint256 oldPrice = currentPrice;
+    currentPrice = price;
+    lastPriceUpdate = block.timestamp;
+    volume24h += amount;
+    
+    // Eğer kullanıcı daha önce hiç token almamışsa, holder sayısını artırın
+    if (balanceOf(msg.sender) == amount) {
+        holdersCount++;
     }
+    
+    // Sanal likidite güncellemesi: İşlemden elde edilen UNIT0 toplamı
+    liquidityPool += totalCost;
+    
+    // Fazla ödeme varsa geri gönder
+    if (msg.value > totalCost) {
+        payable(msg.sender).transfer(msg.value - totalCost);
+    }
+    
+    emit TokensPurchased(msg.sender, amount, price);
+    emit PriceUpdated(oldPrice, price, block.timestamp);
+}
 
+    // Satış işlemi: Kullanıcı tokenlerini sözleşmeye aktarır ve karşılığında ETH alır
     function sellTokens(uint256 amount) external nonReentrant {
         require(isTrading, "Trading is paused");
         require(amount > 0, "Amount must be greater than 0");
@@ -176,7 +187,9 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         uint256 saleProceeds = (amount * price) / 10**18;
         require(liquidityPool >= saleProceeds, "Insufficient liquidity for sale");
         
+        // Tokenleri kullanıcıdan sözleşmeye transfer ediyoruz ve ardından tokenleri yakıyoruz
         _transfer(msg.sender, address(this), amount);
+        _burn(address(this), amount);
         
         currentPrice = price;
         lastPriceUpdate = block.timestamp;
@@ -199,7 +212,7 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         emit PriceUpdated(currentPrice, price, block.timestamp);
     }
 
-    // Admin functions
+    // Admin fonksiyonları
     function updatePatentDetails(string memory newIpfsHash, uint256 newPrice) external onlyOwner {
         patentDetails.ipfsHash = newIpfsHash;
         patentDetails.price = newPrice;
@@ -216,7 +229,7 @@ contract PatentToken is ERC20, Ownable, ReentrancyGuard {
         payable(owner()).transfer(amount);
     }
 
-    // View functions
+    // View fonksiyonları
     function getPatentDetails() external view returns (Patent memory) {
         return patentDetails;
     }
