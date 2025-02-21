@@ -49,6 +49,11 @@ This repository contains a **web-based platform** that enables patent holders to
 ## 🤝 Contributing
 Contributions are welcome! Please fork the repository and submit a PR with your improvements.
 
+## 📑 Documentation
+For detailed documentation, refer to the official documentation file:
+
+[Inventra Documentation](https://github.com/ahmetmat/Inventra/blob/main/Resources/Inventra_documentation.docx)
+
 ## 📜 License
 This project is licensed under the MIT License.
 
