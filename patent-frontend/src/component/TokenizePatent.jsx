@@ -1,27 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { usePatent } from '../../src/component/context/patentcontext';
+import { usePatent } from './context/patentcontext';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Alert } from './ui/alert';
-import {
-  Coins,
-  Tag,
-  AlertCircle,
-  Loader2,
-  CheckCircle
-} from 'lucide-react';
+import { Coins, Loader2, AlertCircle } from 'lucide-react';
 import { ethers } from 'ethers';
 
 const TokenizePatent = () => {
   const { patentId } = useParams();
   const navigate = useNavigate();
-  const { createPatentToken, getPatentDetails } = usePatent();
+  const { createPatentToken, getAllPatents, account } = usePatent();
 
   const [patent, setPatent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentStep, setCurrentStep] = useState('');
+  const [tokenAddress, setTokenAddress] = useState(null);
   
   const [tokenDetails, setTokenDetails] = useState({
     name: '',
@@ -35,11 +30,16 @@ const TokenizePatent = () => {
 
   const loadPatentDetails = async () => {
     try {
-      const details = await getPatentDetails(patentId);
-      setPatent(details);
+      const patents = await getAllPatents();
+      const currentPatent = patents.find(p => p.id.toString() === patentId);
       
-      // Otomatik isim ve sembol önerisi
-      const suggestedSymbol = details.title
+      if (!currentPatent) {
+        throw new Error('Patent not found');
+      }
+
+      setPatent(currentPatent);
+      
+      const suggestedSymbol = currentPatent.title
         .split(' ')
         .map(word => word[0])
         .join('')
@@ -48,7 +48,7 @@ const TokenizePatent = () => {
 
       setTokenDetails(prev => ({
         ...prev,
-        name: `${details.title} Token`,
+        name: `${currentPatent.title} Token`,
         symbol: suggestedSymbol
       }));
 
@@ -63,9 +63,12 @@ const TokenizePatent = () => {
     try {
       setLoading(true);
       setError(null);
-
       setCurrentStep('Creating token contract...');
-      const investmentInWei = ethers.parseEther(tokenDetails.initialInvestment);
+      
+      // Use BigInt for Wei conversion
+      const oneEther = BigInt('1000000000000000000'); // 1 ETH in Wei
+      const investment = parseFloat(tokenDetails.initialInvestment);
+      const investmentInWei = BigInt(Math.floor(investment * Number(oneEther)));
       
       const tx = await createPatentToken(
         tokenDetails.name,
@@ -74,7 +77,19 @@ const TokenizePatent = () => {
         { value: investmentInWei }
       );
 
-      setCurrentStep('Transaction confirmed! Redirecting...');
+      setCurrentStep('Waiting for transaction confirmation...');
+      const receipt = await tx.wait();
+      
+      // Extract token address from event
+      const event = receipt.events?.find(e => e.event === 'PatentTokenCreated');
+      const newTokenAddress = event?.args?.tokenAddress;
+
+      if (!newTokenAddress) {
+        throw new Error('Token creation failed - no token address in event');
+      }
+
+      setTokenAddress(newTokenAddress);
+      setCurrentStep('Token created successfully! Redirecting...');
       
       setTimeout(() => {
         navigate(`/trade-patent/${patentId}`);
@@ -82,7 +97,7 @@ const TokenizePatent = () => {
 
     } catch (err) {
       console.error('Tokenization error:', err);
-      setError(err.message);
+      setError(err.message || 'Failed to create token');
     } finally {
       setLoading(false);
     }
@@ -112,7 +127,6 @@ const TokenizePatent = () => {
           )}
 
           <div className="space-y-6">
-            {/* Token Details Form */}
             <div>
               <label className="block text-sm font-medium mb-1">
                 Token Name
@@ -167,7 +181,6 @@ const TokenizePatent = () => {
               </p>
             </div>
 
-            {/* Processing State */}
             {loading && currentStep && (
               <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -175,7 +188,6 @@ const TokenizePatent = () => {
               </div>
             )}
 
-            {/* Action Buttons */}
             <div className="flex gap-4">
               <Button
                 variant="outline"

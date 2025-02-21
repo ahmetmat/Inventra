@@ -12,6 +12,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.0.7",
     "ethers": "^5.7.2",
+    "lightweight-charts": "^5.0.2",
     "lucide-react": "^0.475.0",
     "pdfjs-dist": "^3.11.174",
     "pinata-web3": "^0.5.4",

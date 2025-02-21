@@ -128,38 +128,46 @@ const PatentUpload = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file || !metadata.title || !metadata.customId) return;
-    if (!account) {
-      setError('Please connect your wallet first');
-      return;
-    }
-
+  
     try {
       setLoading(true);
       setError(null);
-
-      // 1. IPFS'e yükle
+  
+      // 1. IPFS upload
       setCurrentStep('Uploading to IPFS...');
       const ipfsHash = await uploadPatent(file, metadata);
-
-      // 2. Kontrata kaydet
+      console.log('IPFS Upload successful:', ipfsHash); // Add this
+  
+      // 2. Contract registration
       setCurrentStep('Registering on blockchain...');
+      console.log('Registering with params:', {
+        title: metadata.title,
+        ipfsHash,
+        customId: metadata.customId
+      }); // Add this
       const patentId = await registerPatent(
         metadata.title,
         ipfsHash,
         metadata.customId
       );
-
-      // 3. Başarılı yükleme
+  
+      // 3. Success
       setCurrentStep('Upload completed!');
       setTimeout(() => {
-        navigate(`/patents`);
+        navigate(`/tokenize-patent/${patentId}`);
       }, 2000);
-
+  
+  
     } catch (err) {
-      console.error('Upload error:', err);
+      console.error('Upload error details:', {
+        message: err.message,
+        code: err.code,
+        data: err.data
+      }); // Add this
       setError(err.message);
     } finally {
       setLoading(false);
+      setCurrentStep('');
     }
   };
 

@@ -5,6 +5,7 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Alert } from './ui/alert';
 import { FileText, Shield, Clock, DollarSign, TrendingUp } from 'lucide-react';
+import StakeModal from './StakeModal';
 
 const PatentList = () => {
   const { getAllPatents, loading: contextLoading, error: contextError } = usePatent();
@@ -13,6 +14,9 @@ const PatentList = () => {
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
   const navigate = useNavigate();
+  const [isStakeModalOpen, setIsStakeModalOpen] = useState(false);
+  const [selectedPatent, setSelectedPatent] = useState(null);
+
 
   useEffect(() => {
     loadPatents();
@@ -75,7 +79,6 @@ const PatentList = () => {
           Tokenized
         </Button>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {patents.map(patent => (
           <Card key={patent.id} className="p-6 hover:shadow-lg transition-shadow">
@@ -119,20 +122,43 @@ const PatentList = () => {
                   </Button>
                 )
               ) : (
-                <Button
-                  size="sm"
-                  onClick={() => navigate(`/trade-patent/${patent.id}`)}
-                >
-                  <TrendingUp className="w-4 h-4 mr-1" />
-                  Trade
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => navigate(`/trade-patent/${patent.id}`)}
+                  >
+                    <TrendingUp className="w-4 h-4 mr-1" />
+                    Trade
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleUsePatent(patent)}
+                  >
+                    <Lock className="w-4 h-4 mr-1" />
+                    Use
+                  </Button>
+                </>
               )}
             </div>
+
+     
           </Card>
         ))}
-      </div>
-    </div>
-  );
+     </div>
+
+{/* Stake Modal */}
+<StakeModal
+  patent={selectedPatent}
+  isOpen={isStakeModalOpen}
+  onClose={() => {
+    setIsStakeModalOpen(false);
+    setSelectedPatent(null);
+  }}
+/>
+</div>
+);
 };
+
 
 export default PatentList;
